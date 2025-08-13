@@ -18,13 +18,12 @@
       --gap:14px; --radius:16px;
     }
     *{box-sizing:border-box}
-    html,body{margin:0;background:var(--bg);color:var(--text);font:16px/1.45 system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, "Helvetica Neue", Arial}
+    html,body{margin:0;background:var(--bg);color:var(--text);font:16px/1.45 system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,"Helvetica Neue",Arial}
     a{color:inherit}
 
     header{display:flex;align-items:center;gap:12px;padding:16px 18px;border-bottom:1px solid #262a36;position:sticky;top:0;background:linear-gradient(180deg, rgba(15,17,21,.96), rgba(15,17,21,.88));backdrop-filter: blur(6px);z-index:10}
     header img{height:36px;width:auto;cursor:pointer}
     header .brand{font-weight:700;letter-spacing:.2px}
-    header .hint{color:var(--muted);font-size:.85rem}
 
     .wrap{max-width:1100px;margin:0 auto;padding:18px}
     .filters{display:grid;grid-template-columns:1fr 1fr 1fr 2fr auto;gap:10px;align-items:center;margin-bottom:16px}
@@ -54,9 +53,8 @@
 </head>
 <body>
   <header>
-    <img id="logoImg" src="./assets/logo.svg" alt="Logo (haz clic para cambiar)">
+    <img id="logoImg" src="./assets/logo.svg" alt="Logo (clic para ir al inicio)">
     <div class="brand">Noticias Positivas</div>
-    <div class="hint">Datos actualizados desde Google Sheets vía Apps Script</div>
   </header>
 
   <main class="wrap">
@@ -112,16 +110,33 @@
     let lastSeenUpdate = null;
     let inFlightController = null; // cancelar peticiones previas
 
-    // Logo editable por el usuario (click → pegar URL)
+    // Reset de filtros y vuelta a la vista principal
+    function resetFiltersToHome(){
+      const cat  = document.getElementById('categorySelect');
+      const cty  = document.getElementById('countrySelect');
+      const city = document.getElementById('citySelect');
+      const q    = document.getElementById('q');
+
+      if (cat)  cat.value  = '';
+      if (cty)  cty.value  = '';
+      if (city) city.value = '';
+      if (q)    q.value    = '';
+
+      lastSeenUpdate = null;               // fuerza recarga completa
+      applyFilters({ fullReload: true });  // recarga
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+
+    // Logo: clic → ir al inicio (resetea filtros).
     (function initLogo(){
       const img = document.getElementById('logoImg');
       if (!img) return;
+
+      // (opcional) si guardaste un logo personalizado en localStorage
       const saved = localStorage.getItem('np_logo');
       if (saved) img.src = saved;
-      img.addEventListener('click', () => {
-        const url = prompt('Pega la URL de tu logo (PNG/JPG/SVG):', saved || '');
-        if (url) { localStorage.setItem('np_logo', url); img.src = url; }
-      });
+
+      img.addEventListener('click', () => resetFiltersToHome());
     })();
 
     function getFavicon(url){

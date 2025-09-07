@@ -157,6 +157,15 @@
       return clipped.length > 240 ? clipped.slice(0,237)+'…' : clipped;
     }
 
+    // ORDENAR SIEMPRE: más nuevas primero por published_at
+    function sortNewest(items){
+      return [...items].sort((a,b) => {
+        const da = new Date(a.published_at || 0).getTime();
+        const db = new Date(b.published_at || 0).getTime();
+        return db - da; // descendente
+      });
+    }
+
     async function fetchNews({ filters = {}, since = null, q = '', limit = INITIAL_LIMIT } = {}){
       // cancela petición anterior si existe
       if (inFlightController) inFlightController.abort();
@@ -253,7 +262,7 @@
         };
         const q = get('q');
 
-        // 1) carga rápida (pocos ítems)
+        // 1) carga rápida (pocos ítems) → ORDENADOS
         const quick = await fetchNews({
           filters,
           since: (!fullReload && lastSeenUpdate) ? lastSeenUpdate : null,
@@ -262,13 +271,15 @@
         });
 
         if (!lastSeenUpdate || quick.last_updated !== lastSeenUpdate || fullReload){
-          await renderIncremental(quick.items || [], q);
+          const quickSorted = sortNewest(quick.items || []);
+          await renderIncremental(quickSorted, q);
           lastSeenUpdate = quick.last_updated;
         }
 
-        // 2) completa en segundo plano
+        // 2) completa en segundo plano → ORDENADOS
         const full = await fetchNews({ filters, q, limit: FULL_LIMIT });
-        await renderIncremental(full.items || [], q);
+        const fullSorted = sortNewest(full.items || []);
+        await renderIncremental(fullSorted, q);
 
       } catch (err){
         if (err.name === 'AbortError') return; // petición cancelada a propósito

@@ -132,7 +132,6 @@
       const img = document.getElementById('logoImg');
       if (!img) return;
 
-      // (opcional) si guardaste un logo personalizado en localStorage
       const saved = localStorage.getItem('np_logo');
       if (saved) img.src = saved;
 
@@ -157,11 +156,30 @@
       return clipped.length > 240 ? clipped.slice(0,237)+'…' : clipped;
     }
 
-    // ORDENAR SIEMPRE: más nuevas primero por published_at
+    /* ==== NUEVO: parseo robusto de fechas (ISO y serial de Sheets) ==== */
+    function parseSheetDate(x){
+      if (x === null || x === undefined) return null;
+
+      // 1) Si ya es Date o ISO/RFC válido
+      const d1 = new Date(x);
+      if (!isNaN(d1)) return d1;
+
+      // 2) Si es número tipo 45123 (serial de Sheets: días desde 1899-12-30)
+      const n = Number(x);
+      if (!isNaN(n)) {
+        // Excel/Sheets base 1899-12-30 -> Unix epoch 1970-01-01 (25569 días de diferencia)
+        const ms = (n - 25569) * 86400000;
+        const d2 = new Date(ms);
+        if (!isNaN(d2)) return d2;
+      }
+      return null;
+    }
+
+    // ORDENAR SIEMPRE: más nuevas primero por published_at (usando parse robusto)
     function sortNewest(items){
       return [...items].sort((a,b) => {
-        const da = new Date(a.published_at || 0).getTime();
-        const db = new Date(b.published_at || 0).getTime();
+        const da = parseSheetDate(a.published_at) || new Date(0);
+        const db = parseSheetDate(b.published_at) || new Date(0);
         return db - da; // descendente
       });
     }
@@ -192,8 +210,8 @@
     }
 
     function fmtDate(d){
-      const dt = new Date(d);
-      return isNaN(dt) ? '' : dt.toLocaleDateString(undefined, {year:'numeric', month:'short', day:'2-digit'});
+      const dt = parseSheetDate(d);
+      return !dt ? '' : dt.toLocaleDateString(undefined, {year:'numeric', month:'short', day:'2-digit'});
     }
 
     function createCard(it){

@@ -26,7 +26,7 @@
     header .brand{font-weight:700;letter-spacing:.2px}
 
     .wrap{max-width:1100px;margin:0 auto;padding:18px}
-    .filters{display:grid;grid-template-columns:1fr 1fr 1fr 2fr auto;gap:10px;align-items:center;margin-bottom:16px}
+    .filters{display:grid;grid-template-columns:1fr 1fr 1fr 1fr 2fr auto;gap:10px;align-items:center;margin-bottom:16px}
     .filters select,.filters input{width:100%;padding:10px 12px;border-radius:10px;border:1px solid #2a2f3a;background:#0f1218;color:var(--text)}
     .filters button{padding:10px 14px;border-radius:10px;border:1px solid #2a2f3a;background:#1f2430;color:#fff;cursor:pointer}
     .filters button:hover{background:#262c3a}
@@ -59,6 +59,14 @@
 
   <main class="wrap">
     <section class="filters">
+      <!-- NUEVO: Idioma -->
+      <select id="langSelect" aria-label="Idioma">
+        <option value="">Todos los idiomas</option>
+        <option value="es">Español</option>
+        <option value="en">Inglés</option>
+        <!-- agrega más si los usas, p.ej. <option value="pt">Portugués</option> -->
+      </select>
+
       <select id="categorySelect" aria-label="Categoría">
         <option value="">Todas las categorías</option>
         <option>Economía</option>
@@ -69,6 +77,7 @@
         <option>Infraestructura</option>
         <option>Empleo</option>
       </select>
+
       <select id="countrySelect" aria-label="País">
         <option value="">Todos los países</option>
         <option>Colombia</option>
@@ -78,6 +87,7 @@
         <option>Chile</option>
         <option>España</option>
       </select>
+
       <select id="citySelect" aria-label="Ciudad">
         <option value="">Todas las ciudades</option>
         <option>Bogotá</option>
@@ -87,6 +97,7 @@
         <option>Santiago</option>
         <option>Madrid</option>
       </select>
+
       <input id="q" class="wide" type="search" placeholder="Buscar por título/fuente…">
       <button id="apply" type="button">Aplicar filtros</button>
     </section>
@@ -112,16 +123,8 @@
 
     // Reset de filtros y vuelta a la vista principal
     function resetFiltersToHome(){
-      const cat  = document.getElementById('categorySelect');
-      const cty  = document.getElementById('countrySelect');
-      const city = document.getElementById('citySelect');
-      const q    = document.getElementById('q');
-
-      if (cat)  cat.value  = '';
-      if (cty)  cty.value  = '';
-      if (city) city.value = '';
-      if (q)    q.value    = '';
-
+      const ids = ['langSelect','categorySelect','countrySelect','citySelect','q'];
+      ids.forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
       lastSeenUpdate = null;               // fuerza recarga completa
       applyFilters({ fullReload: true });  // recarga
       window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -131,10 +134,8 @@
     (function initLogo(){
       const img = document.getElementById('logoImg');
       if (!img) return;
-
       const saved = localStorage.getItem('np_logo');
       if (saved) img.src = saved;
-
       img.addEventListener('click', () => resetFiltersToHome());
     })();
 
@@ -156,36 +157,30 @@
       return clipped.length > 240 ? clipped.slice(0,237)+'…' : clipped;
     }
 
-    /* ==== NUEVO: parseo robusto de fechas (ISO y serial de Sheets) ==== */
+    // Fechas: ISO o serial de Sheets
     function parseSheetDate(x){
       if (x === null || x === undefined) return null;
-
-      // 1) Si ya es Date o ISO/RFC válido
       const d1 = new Date(x);
       if (!isNaN(d1)) return d1;
-
-      // 2) Si es número tipo 45123 (serial de Sheets: días desde 1899-12-30)
       const n = Number(x);
       if (!isNaN(n)) {
-        // Excel/Sheets base 1899-12-30 -> Unix epoch 1970-01-01 (25569 días de diferencia)
-        const ms = (n - 25569) * 86400000;
+        const ms = (n - 25569) * 86400000; // base 1899-12-30
         const d2 = new Date(ms);
         if (!isNaN(d2)) return d2;
       }
       return null;
     }
 
-    // ORDENAR SIEMPRE: más nuevas primero por published_at (usando parse robusto)
+    // Orden descendente por fecha
     function sortNewest(items){
       return [...items].sort((a,b) => {
         const da = parseSheetDate(a.published_at) || new Date(0);
         const db = parseSheetDate(b.published_at) || new Date(0);
-        return db - da; // descendente
+        return db - da;
       });
     }
 
     async function fetchNews({ filters = {}, since = null, q = '', limit = INITIAL_LIMIT } = {}){
-      // cancela petición anterior si existe
       if (inFlightController) inFlightController.abort();
       inFlightController = new AbortController();
 
@@ -195,6 +190,7 @@
         fallback: '1',
         t: Date.now().toString() // anti-caché
       });
+      if (filters.language) params.append('language', filters.language);
       if (filters.category) params.append('category', filters.category);
       if (filters.country)  params.append('country',  filters.country);
       if (filters.city)     params.append('city',     filters.city);
@@ -221,6 +217,7 @@
         : `<div class="favicon-circle"><img src="${getFavicon(it.url)}" alt=""></div>`;
 
       const chipCat  = it.category ? `<span class="chip">${it.category}</span>` : '';
+      const chipLang = it.language ? `<span class="chip">${String(it.language).toUpperCase()}</span>` : '';
       const chipLoc  = it.country ? `<span class="chip">${it.country}${it.city ? ' · ' + it.city : ''}</span>` : '';
       const source   = it.source ? `<span>${it.source}</span>` : '';
       const pub      = it.published_at ? `<span>${fmtDate(it.published_at)}</span>` : '';
@@ -238,7 +235,7 @@
           </div>
           <div class="reason">${it.positivity_reason || ''}</div>
           <div class="meta">
-            ${chipCat} ${chipLoc} ${source} ${pub}
+            ${chipCat} ${chipLang} ${chipLoc} ${source} ${pub}
           </div>
           <div class="excerpt">${excerpt}</div>
         </div>
@@ -260,12 +257,11 @@
       }
       empty.style.display = 'none';
 
-      // Inserta en lotes para mantener la UI fluida
       const BATCH = 8;
       for (let i = 0; i < filtered.length; i++){
         list.appendChild(createCard(filtered[i]));
         if ((i+1) % BATCH === 0) {
-          await new Promise(r => requestAnimationFrame(r)); // cede al navegador
+          await new Promise(r => requestAnimationFrame(r));
         }
       }
     }
@@ -274,13 +270,14 @@
       try {
         const get = (id) => (document.getElementById(id)?.value || '').trim();
         const filters = {
+          language: get('langSelect'),
           category: get('categorySelect'),
           country:  get('countrySelect'),
           city:     get('citySelect')
         };
         const q = get('q');
 
-        // 1) carga rápida (pocos ítems) → ORDENADOS
+        // Carga rápida
         const quick = await fetchNews({
           filters,
           since: (!fullReload && lastSeenUpdate) ? lastSeenUpdate : null,
@@ -294,13 +291,13 @@
           lastSeenUpdate = quick.last_updated;
         }
 
-        // 2) completa en segundo plano → ORDENADOS
+        // Completa en segundo plano
         const full = await fetchNews({ filters, q, limit: FULL_LIMIT });
         const fullSorted = sortNewest(full.items || []);
         await renderIncremental(fullSorted, q);
 
       } catch (err){
-        if (err.name === 'AbortError') return; // petición cancelada a propósito
+        if (err.name === 'AbortError') return;
         console.error(err);
         const empty = document.getElementById('empty');
         if (empty){
@@ -310,7 +307,6 @@
       }
     }
 
-    // Inicia todo cuando el DOM está listo
     document.addEventListener('DOMContentLoaded', () => {
       const btn = document.getElementById('apply');
       if (btn) btn.addEventListener('click', () => applyFilters({ fullReload: true }));

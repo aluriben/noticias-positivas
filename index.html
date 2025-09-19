@@ -45,9 +45,12 @@
     .topbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
     .topbar .chip{cursor:pointer}
 
-    @media (max-width:680px){
-      .filters{grid-template-columns:1fr 1fr;grid-auto-rows:auto}
+    footer{margin:28px auto 40px auto; text-align:center; color:var(--muted)}
+
+    @media (max-width:980px){
+      .filters{grid-template-columns:1fr 1fr 1fr;grid-auto-rows:auto}
       .filters .wide{grid-column:1 / -1}
+      .filters .long{grid-column:1 / -1}
     }
   </style>
 </head>
@@ -57,12 +60,15 @@
     <div class="brand">Noticias Positivas</div>
   </header>
 
-  <div id="statsBar" class="wrap" style="margin-top:8px; color:#a9acb7;">&nbsp;</div>
+  <!-- Barra de racha / total usuario -->
+  <div class="wrap" style="margin-top:8px; color:#a9acb7;" id="userBar">
+    Has visto Noticias Positivas: <b id="daysTotal">0</b> días en total · <b id="daysStreak">0</b> días seguidos
+  </div>
 
   <main class="wrap">
     <div class="topbar">
       <button id="btnLater" class="chip">Ver “Leer después”</button>
-      <!-- aquí podrías añadir más chips (ej. “Top hoy”) -->
+      <button id="btnBackAll" class="chip" style="display:none;">Volver a todas las noticias</button>
     </div>
 
     <section class="filters">
@@ -75,6 +81,11 @@
       <!-- CATEGORÍA dinámica -->
       <select id="categorySelect" aria-label="Categoría">
         <option value="">Todas las categorías</option>
+      </select>
+
+      <!-- NUEVO: multi-select de fuentes -->
+      <select id="sourcesSelect" aria-label="Fuentes" multiple class="long" title="Selecciona una o varias fuentes">
+        <!-- se llena dinámicamente -->
       </select>
 
       <select id="countrySelect" aria-label="País">
@@ -101,23 +112,24 @@
       <button id="apply" type="button">Aplicar filtros</button>
     </section>
 
-    <!-- Formulario “Enviar fuente” -->
-    <form id="proposeForm" class="filters" style="grid-template-columns: 2fr 3fr 2fr auto; margin-top:0;">
-      <input type="text" id="p_name" placeholder="Nombre de la fuente (visible)">
-      <input type="url"  id="p_rss"  placeholder="URL RSS (https://...)">
-      <input type="text" id="p_cat"  placeholder="Categoría (opcional)">
-      <button type="submit">Sugerir fuente</button>
-    </form>
+    <!-- Sugerir fuente (copy nuevo) -->
+    <div class="filters" style="grid-template-columns: 3fr 1fr; margin-top:0;">
+      <input id="p_rss" type="url" placeholder="¿No ves tu fuente favorita? Pega aquí la URL RSS (https://…)" class="long">
+      <button id="btnSuggest" type="button">Sugerir fuente</button>
+    </div>
     <div id="proposeMsg" style="color:#a9acb7; margin:8px 0 16px 0;"></div>
 
     <div id="empty">Cargando noticias…</div>
     <section id="list" class="grid" aria-live="polite"></section>
   </main>
 
+  <footer>
+    <div id="happyBar">Haciendo feliz a 0 personas (total histórico)</div>
+  </footer>
+
   <script>
     // ======== CONFIG ========
-    const API_URL = "https://script.google.com/macros/s/AKfycbwmz6kGPilJDrrrc9NqUKXSxTfpMa2l1LHh7diriHo6nSjoliQMp_JtBHT9GDomtKqf/exec"; // <--- REEMPLAZA y deja las comillas
-
+    const API_URL = "https://script.google.com/macros/s/AKfycbxaq4Lv3AsxTt14_wjNgKFj6t97-grEd31urD9NJORVTKAy4BFnj_SsZpvChbXVm7C1/exec"; // <-- cámbiala y deja comillas
     const INITIAL_LIMIT = 24;
     const FULL_LIMIT    = 60;
     const REFRESH_MS    = 300000;  // 5 min
@@ -145,18 +157,25 @@
         category: get('categorySelect'),
         country:  get('countrySelect'),
         city:     get('citySelect'),
-        q:        get('q')
+        q:        get('q'),
+        sources:  Array.from(document.getElementById('sourcesSelect')?.selectedOptions || []).map(o=>o.value)
       };
       localStorage.setItem(PREF_KEY, JSON.stringify(prefs));
     }
     function loadFilters(){
       try {
         const prefs = JSON.parse(localStorage.getItem(PREF_KEY) || '{}');
-        Object.entries(prefs).forEach(([k,v]) => {
-          const id = (k === 'q') ? 'q' : k + 'Select';
+        const map = { language:'langSelect', category:'categorySelect', country:'countrySelect', city:'citySelect', q:'q' };
+        Object.entries(map).forEach(([k,id]) => {
           const el = document.getElementById(id);
-          if (el && typeof v === 'string') el.value = v;
+          if (el && typeof prefs[k] === 'string') el.value = prefs[k];
         });
+        if (Array.isArray(prefs.sources)) {
+          const sel = document.getElementById('sourcesSelect');
+          if (sel) {
+            Array.from(sel.options).forEach(o => { o.selected = prefs.sources.includes(o.value); });
+          }
+        }
       } catch(e){}
     }
 
@@ -178,15 +197,20 @@
     }
     cleanupLater();
 
-    // ======== UTILIDADES UI ========
+    // ======== UTILIDADES ========
     let lastSeenUpdate = null;
     let inFlightController = null;
     let applyTimer = null;
+    let inLaterView = false;
 
     function resetFiltersToHome(){
       const ids = ['langSelect','categorySelect','countrySelect','citySelect','q'];
       ids.forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
+      const sel = document.getElementById('sourcesSelect');
+      if (sel) Array.from(sel.options).forEach(o => o.selected = false);
       lastSeenUpdate = null;
+      inLaterView = false;
+      document.getElementById('btnBackAll').style.display = 'none';
       saveFilters();
       applyFilters({ fullReload: true });
       window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -253,8 +277,11 @@
       if (filters.category) params.append('category', filters.category);
       if (filters.country)  params.append('country',  filters.country);
       if (filters.city)     params.append('city',     filters.city);
-      if (since)            params.append('since',    since);
-      if (q)                params.append('q',        q);
+      if (filters.sources && filters.sources.length){
+        params.append('sources', filters.sources.join(','));
+      }
+      if (since) params.append('since', since);
+      if (q)     params.append('q', q);
 
       const res = await fetch(`${API_URL}?${params.toString()}`, {
         cache: 'no-store',
@@ -265,10 +292,15 @@
     }
 
     async function fetchCategories(){
-      const url = `${API_URL}?fn=categories&t=${Date.now()}`;
-      const res = await fetch(url, { cache: 'no-store' });
+      const res = await fetch(`${API_URL}?fn=categories&t=${Date.now()}`, { cache: 'no-store' });
       if (!res.ok) throw new Error('No se pudieron cargar las categorías');
-      return res.json(); // { categories: [...], last_updated: ... }
+      return res.json(); // { categories: [...] }
+    }
+
+    async function fetchSources(){
+      const res = await fetch(`${API_URL}?fn=sources&t=${Date.now()}`, { cache:'no-store' });
+      if (!res.ok) throw new Error('No se pudieron cargar las fuentes');
+      return res.json(); // { sources: [...] }
     }
 
     function populateCategorySelect(categories){
@@ -285,6 +317,20 @@
       if (current && [...sel.options].some(o => o.value.toLowerCase() === current.toLowerCase())) {
         sel.value = current;
       }
+    }
+
+    function populateSourcesSelect(sources){
+      const sel = document.getElementById('sourcesSelect');
+      if (!sel) return;
+      const prev = new Set((JSON.parse(localStorage.getItem(PREF_KEY) || '{}').sources) || []);
+      sel.innerHTML = '';
+      (sources || []).forEach(s => {
+        const opt = document.createElement('option');
+        opt.value = s;
+        opt.textContent = s;
+        opt.selected = prev.has(s);
+        sel.appendChild(opt);
+      });
     }
 
     function fmtDate(d){
@@ -347,20 +393,20 @@
 
       // Like
       const likesLocal = getLikesLocal();
-      const liked = likesLocal.has(it.dedup || it.url);
+      const keyLike = it.dedup || it.url;
+      const liked = likesLocal.has(keyLike);
       const likeBtn = document.createElement('button');
       likeBtn.textContent = liked ? '❤️ Te gusta' : '🤍 Me gusta';
       likeBtn.className = 'chip';
       likeBtn.onclick = async () => {
-        const key = it.dedup || it.url;
         const nowSet = getLikesLocal();
-        if (nowSet.has(key)) return;
-        nowSet.add(key);
+        if (nowSet.has(keyLike)) return;
+        nowSet.add(keyLike);
         setLikesLocal(nowSet);
         likeBtn.textContent = '❤️ Te gusta';
         const params = new URLSearchParams({
           fn: 'like',
-          dedup: key,
+          dedup: keyLike,
           url: it.url,
           title: it.title || '',
           source: it.source || '',
@@ -416,11 +462,13 @@
     async function applyFilters({ fullReload = false } = {}){
       try {
         const get = (id) => (document.getElementById(id)?.value || '').trim();
+        const selectedSources = Array.from(document.getElementById('sourcesSelect')?.selectedOptions || []).map(o=>o.value);
         const filters = {
           language: get('langSelect'),
           category: get('categorySelect'),
           country:  get('countrySelect'),
-          city:     get('citySelect')
+          city:     get('citySelect'),
+          sources:  selectedSources
         };
         const q = get('q');
         saveFilters();
@@ -458,25 +506,10 @@
       applyTimer = setTimeout(() => applyFilters({ fullReload: true }), 2000); // auto 2s
     }
 
-    async function refreshStatsBar(){
-      const statsEl = document.getElementById('statsBar');
-      if (!statsEl) return;
-      const streak = Number(localStorage.getItem('np_streak')||0);
-      const total  = Number(localStorage.getItem('np_totalDays')||0);
-      let visitors = '…';
-      try {
-        const res = await fetch(`${API_URL}?fn=stats&t=${Date.now()}`, { cache:'no-store' });
-        const json = await res.json();
-        visitors = json.visitors_today ?? '…';
-      } catch {}
-      statsEl.textContent = `Haciendo feliz a ${visitors} personas hoy · Tu racha: ${streak} días · Has venido ${total} días en total`;
-    }
-
-    // ======== Racha de lectura ========
+    // ======== Racha de lectura (usuario) ========
     const STREAK_KEY = 'np_streak';
     const LAST_KEY   = 'np_lastVisit';
     const TOTAL_KEY  = 'np_totalDays';
-
     function updateStreak(){
       const todayStr = new Date().toDateString();
       const last = localStorage.getItem(LAST_KEY);
@@ -491,32 +524,45 @@
         localStorage.setItem(STREAK_KEY, String(streak));
         localStorage.setItem(TOTAL_KEY, String(total));
       }
-      return { streak, total };
+      document.getElementById('daysTotal').textContent  = String(Number(localStorage.getItem(TOTAL_KEY)||0));
+      document.getElementById('daysStreak').textContent = String(Number(localStorage.getItem(STREAK_KEY)||0));
+    }
+
+    async function refreshHappyBar(){
+      try {
+        const res = await fetch(`${API_URL}?fn=stats&t=${Date.now()}`, { cache:'no-store' });
+        const json = await res.json();
+        const total = json.total_visits ?? 0;
+        document.getElementById('happyBar').textContent = `Haciendo feliz a ${total} personas (total histórico)`;
+      } catch {
+        // ignore
+      }
     }
 
     // ======== Eventos iniciales ========
     document.addEventListener('DOMContentLoaded', async () => {
-      // Ping de visita
+      // Log de visita (para total histórico)
       (async () => {
         const params = new URLSearchParams({ fn:'visit', device: DEVICE_ID, t: Date.now().toString() });
         fetch(`${API_URL}?${params.toString()}`, { method:'GET', cache:'no-store' }).catch(()=>{});
       })();
 
+      // Streak usuario
       updateStreak();
 
-      // Cargar categorías dinámicas antes de aplicar filtros
+      // Cargar catálogos y preferencias
       try {
-        const { categories } = await fetchCategories();
+        const [{categories},{sources}] = await Promise.all([fetchCategories(), fetchSources()]);
         populateCategorySelect(categories || []);
+        populateSourcesSelect(sources || []);
       } catch(e) {
-        console.warn('No se pudieron cargar categorías dinámicas:', e);
+        console.warn('No se pudieron cargar catálogos dinámicos:', e);
       }
 
-      // cargar preferencias guardadas
       loadFilters();
 
       // Listeners para auto-aplicar + guardar prefs
-      ['langSelect','categorySelect','countrySelect','citySelect','q'].forEach(id => {
+      ['langSelect','categorySelect','countrySelect','citySelect','q','sourcesSelect'].forEach(id => {
         const el = document.getElementById(id);
         if (!el) return;
         const ev = (id === 'q') ? 'input' : 'change';
@@ -524,33 +570,26 @@
       });
 
       // Botón aplicar
-      const btn = document.getElementById('apply');
-      if (btn) btn.addEventListener('click', () => applyFilters({ fullReload: true }));
+      document.getElementById('apply')?.addEventListener('click', () => applyFilters({ fullReload: true }));
 
-      // Proponer fuente
-      const form = document.getElementById('proposeForm');
+      // Sugerir fuente (URL única)
       const msg  = document.getElementById('proposeMsg');
-      if (form) {
-        form.addEventListener('submit', async (e) => {
-          e.preventDefault();
-          const name = document.getElementById('p_name').value.trim();
-          const rss  = document.getElementById('p_rss').value.trim();
-          const cat  = document.getElementById('p_cat').value.trim();
-          if (!name || !rss) { msg.textContent = 'Completa nombre y URL RSS.'; return; }
-          const params = new URLSearchParams({ fn:'propose_source', name, rss_url:rss, category:cat, t:Date.now().toString() });
-          try {
-            const res = await fetch(`${API_URL}?${params.toString()}`, { method:'GET', cache:'no-store' });
-            if (!res.ok) throw new Error('fail');
-            msg.textContent = '¡Gracias! Revisaremos tu fuente.';
-            form.reset();
-          } catch {
-            msg.textContent = 'No pudimos enviar la propuesta ahora.';
-          }
-          setTimeout(()=> msg.textContent='', 4000);
-        });
-      }
+      document.getElementById('btnSuggest')?.addEventListener('click', async () => {
+        const rss = document.getElementById('p_rss').value.trim();
+        if (!rss) { msg.textContent = 'Pega la URL RSS para sugerirla.'; return; }
+        const params = new URLSearchParams({ fn:'propose_source', rss_url:rss, t:Date.now().toString() });
+        try {
+          const res = await fetch(`${API_URL}?${params.toString()}`, { method:'GET', cache:'no-store' });
+          if (!res.ok) throw new Error('fail');
+          msg.textContent = '¡Gracias! Revisaremos tu fuente.';
+          document.getElementById('p_rss').value = '';
+        } catch {
+          msg.textContent = 'No pudimos enviar la propuesta ahora.';
+        }
+        setTimeout(()=> msg.textContent='', 4000);
+      });
 
-      // Ver “Leer después”
+      // Ver “Leer después” y volver
       document.getElementById('btnLater')?.addEventListener('click', async () => {
         cleanupLater();
         const map = getLater();
@@ -561,16 +600,25 @@
           const items = (json.items || []).filter(it => keys.has(it.dedup || it.url));
           await renderIncremental(items, '');
           window.scrollTo({ top: 0, behavior: 'smooth' });
+          inLaterView = true;
+          document.getElementById('btnBackAll').style.display = 'inline-block';
         } catch {}
+      });
+
+      document.getElementById('btnBackAll')?.addEventListener('click', () => {
+        inLaterView = false;
+        document.getElementById('btnBackAll').style.display = 'none';
+        applyFilters({ fullReload: true });
+        window.scrollTo({ top: 0, behavior: 'smooth' });
       });
 
       // Primera carga y refrescos
       await applyFilters({ fullReload: true });
-      setInterval(() => applyFilters({ fullReload: false }), REFRESH_MS);
+      setInterval(() => { if (!inLaterView) applyFilters({ fullReload: false }); }, REFRESH_MS);
 
-      // Stats bar
-      refreshStatsBar();
-      setInterval(refreshStatsBar, 120000);
+      // Footer (total histórico)
+      refreshHappyBar();
+      setInterval(refreshHappyBar, 180000);
     });
   </script>
 </body>

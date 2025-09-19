@@ -5,11 +5,8 @@
   <title>Noticias Positivas</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
 
-  <!-- Preconexión (reduce handshake con Google Apps Script) -->
   <link rel="preconnect" href="https://script.google.com">
   <link rel="dns-prefetch" href="https://script.google.com">
-
-  <!-- Favicon -->
   <link rel="icon" href="./assets/logo.svg" type="image/svg+xml">
 
   <style>
@@ -59,23 +56,15 @@
 
   <main class="wrap">
     <section class="filters">
-      <!-- NUEVO: Idioma -->
       <select id="langSelect" aria-label="Idioma">
         <option value="">Todos los idiomas</option>
         <option value="es">Español</option>
         <option value="en">Inglés</option>
-        <!-- agrega más si los usas, p.ej. <option value="pt">Portugués</option> -->
       </select>
 
+      <!-- CATEGORÍA: ahora se pobla dinámicamente -->
       <select id="categorySelect" aria-label="Categoría">
         <option value="">Todas las categorías</option>
-        <option>Economía</option>
-        <option>Educación</option>
-        <option>Salud</option>
-        <option>Ambiente</option>
-        <option>Tecnología</option>
-        <option>Infraestructura</option>
-        <option>Empleo</option>
       </select>
 
       <select id="countrySelect" aria-label="País">
@@ -102,35 +91,31 @@
       <button id="apply" type="button">Aplicar filtros</button>
     </section>
 
-    <!-- Loader / estado -->
     <div id="empty">Cargando noticias…</div>
-
-    <!-- Contenedor de tarjetas -->
     <section id="list" class="grid" aria-live="polite"></section>
   </main>
 
   <script>
-    // URL de tu Web App de Google Apps Script (termina en /exec)
-    const API_URL = "https://script.google.com/macros/s/AKfycbyd_9immyzyRa0UiFT9n8CoM6R95nZ9bqf_xlEwK7E-6D6T38OCjxZ3XLblL-L-CXj2/exec";
+    // 1) PON AQUÍ tu URL de la Web App de Google Apps Script (termina en /exec)
+    const API_URL = "TU_URL_WEB_APP_AQUÍ"; // <-- reemplaza por la tuya
 
-    // Estrategia de carga y refresco
-    const INITIAL_LIMIT = 24;      // pinta rápido
-    const FULL_LIMIT    = 60;      // completa
-    const REFRESH_MS    = 300000;  // 5 minutos
+    // Carga y refresco
+    const INITIAL_LIMIT = 24;
+    const FULL_LIMIT    = 60;
+    const REFRESH_MS    = 300000;  // 5 min
 
     let lastSeenUpdate = null;
-    let inFlightController = null; // cancelar peticiones previas
+    let inFlightController = null;
+    let applyTimer = null; // para auto-aplicar tras cambios (debounce 2s)
 
-    // Reset de filtros y vuelta a la vista principal
     function resetFiltersToHome(){
       const ids = ['langSelect','categorySelect','countrySelect','citySelect','q'];
       ids.forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
-      lastSeenUpdate = null;               // fuerza recarga completa
-      applyFilters({ fullReload: true });  // recarga
+      lastSeenUpdate = null;
+      applyFilters({ fullReload: true });
       window.scrollTo({ top: 0, behavior: 'smooth' });
     }
 
-    // Logo: clic → ir al inicio (resetea filtros).
     (function initLogo(){
       const img = document.getElementById('logoImg');
       if (!img) return;
@@ -157,21 +142,19 @@
       return clipped.length > 240 ? clipped.slice(0,237)+'…' : clipped;
     }
 
-    // Fechas: ISO o serial de Sheets
     function parseSheetDate(x){
       if (x === null || x === undefined) return null;
       const d1 = new Date(x);
       if (!isNaN(d1)) return d1;
       const n = Number(x);
       if (!isNaN(n)) {
-        const ms = (n - 25569) * 86400000; // base 1899-12-30
+        const ms = (n - 25569) * 86400000;
         const d2 = new Date(ms);
         if (!isNaN(d2)) return d2;
       }
       return null;
     }
 
-    // Orden descendente por fecha
     function sortNewest(items){
       return [...items].sort((a,b) => {
         const da = parseSheetDate(a.published_at) || new Date(0);
@@ -188,7 +171,7 @@
         limit: String(limit),
         min: '10',
         fallback: '1',
-        t: Date.now().toString() // anti-caché
+        t: Date.now().toString()
       });
       if (filters.language) params.append('language', filters.language);
       if (filters.category) params.append('category', filters.category);
@@ -203,6 +186,29 @@
       });
       if (!res.ok) throw new Error(`API error: ${res.status}`);
       return await res.json();
+    }
+
+    async function fetchCategories(){
+      const url = `${API_URL}?fn=categories&t=${Date.now()}`;
+      const res = await fetch(url, { cache: 'no-store' });
+      if (!res.ok) throw new Error('No se pudieron cargar las categorías');
+      return res.json(); // { categories: [...], last_updated: ... }
+    }
+
+    function populateCategorySelect(categories){
+      const sel = document.getElementById('categorySelect');
+      if (!sel) return;
+      const current = sel.value;
+      sel.innerHTML = `<option value="">Todas las categorías</option>`;
+      (categories || []).forEach(c => {
+        const opt = document.createElement('option');
+        opt.value = c;        // usa el texto exacto que devuelve el backend
+        opt.textContent = c;
+        sel.appendChild(opt);
+      });
+      if (current && [...sel.options].some(o => o.value.toLowerCase() === current.toLowerCase())) {
+        sel.value = current;
+      }
     }
 
     function fmtDate(d){
@@ -253,6 +259,7 @@
 
       if (!filtered.length) {
         empty.style.display = 'block';
+        empty.textContent = 'No hay resultados con este filtro.';
         return;
       }
       empty.style.display = 'none';
@@ -277,7 +284,6 @@
         };
         const q = get('q');
 
-        // Carga rápida
         const quick = await fetchNews({
           filters,
           since: (!fullReload && lastSeenUpdate) ? lastSeenUpdate : null,
@@ -291,7 +297,6 @@
           lastSeenUpdate = quick.last_updated;
         }
 
-        // Completa en segundo plano
         const full = await fetchNews({ filters, q, limit: FULL_LIMIT });
         const fullSorted = sortNewest(full.items || []);
         await renderIncremental(fullSorted, q);
@@ -307,9 +312,33 @@
       }
     }
 
-    document.addEventListener('DOMContentLoaded', () => {
+    function scheduleApply(){
+      if (applyTimer) clearTimeout(applyTimer);
+      applyTimer = setTimeout(() => applyFilters({ fullReload: true }), 2000); // auto-aplica a los 2s
+    }
+
+    document.addEventListener('DOMContentLoaded', async () => {
+      // 1) Cargar categorías reales desde el backend y poblar el select
+      try {
+        const { categories } = await fetchCategories();
+        populateCategorySelect(categories || []);
+      } catch(e) {
+        console.warn('No se pudieron cargar categorías dinámicas:', e);
+      }
+
+      // 2) Auto-aplicar filtros (debounce 2s) al cambiar cualquier selector o la búsqueda
+      ['langSelect','categorySelect','countrySelect','citySelect','q'].forEach(id => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        const ev = (id === 'q') ? 'input' : 'change';
+        el.addEventListener(ev, scheduleApply);
+      });
+
+      // 3) Botón "Aplicar filtros" sigue funcionando como acción inmediata
       const btn = document.getElementById('apply');
       if (btn) btn.addEventListener('click', () => applyFilters({ fullReload: true }));
+
+      // 4) Carga inicial + refresco periódico
       applyFilters({ fullReload: true });
       setInterval(() => applyFilters({ fullReload: false }), REFRESH_MS);
     });
